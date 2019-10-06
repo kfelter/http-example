@@ -7,9 +7,9 @@ import (
 	"net/http"
 	"os"
 
+	"github.com/felts94/http-example/storage"
 	"github.com/julienschmidt/httprouter"
 
-	"github.com/felts94/al-go/storage"
 	"github.com/pkg/errors"
 )
 
@@ -46,7 +46,7 @@ func run() error {
 
 func setupDatabase(t string) (storage.Client, func() error, error) {
 	switch t {
-	case "file":
+	case "newfile":
 		os.Mkdir("./storage", os.ModePerm)
 		f, err := ioutil.TempFile("./storage/", "storage*.json")
 		if err != nil {
@@ -62,6 +62,34 @@ func setupDatabase(t string) (storage.Client, func() error, error) {
 		// pass the pointer of fileclient, that implements the storage.Client interface
 		// https://stackoverflow.com/questions/44370277/type-is-pointer-to-interface-not-interface-confusion
 		return &fc, fc.Cleanup, nil
+	case "file":
+		fname := "./storage/kv.json"
+		var f *os.File
+
+		os.Mkdir("./storage", os.ModePerm)
+		if _, err := os.Stat(fname); err != nil {
+
+			f, err = os.Create(fname)
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "create "+fname)
+			}
+
+			_, err = f.Write([]byte(`{"statusCheckCount": 0}`))
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "Writing initial data")
+			}
+		} else {
+			f, err = os.Open(fname)
+			if err != nil {
+				return nil, nil, errors.Wrap(err, "opening "+fname)
+			}
+		}
+
+		fc := &storage.FileClient{
+			File: f,
+		}
+		return fc, fc.Cleanup, nil
+
 	}
 	return nil, nil, errors.New("Invalid DB type")
 }
