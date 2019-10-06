@@ -1,0 +1,9 @@
+vendor
+cmd/server/server
+
+testing/plot.html
+testing/results.bin
+testing/metrics.json
+server/storage/*
+testing/results*
+cmd/wiki/wiki
