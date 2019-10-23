@@ -5,6 +5,7 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 
 	"github.com/felts94/http-example/storage"
@@ -27,6 +28,9 @@ func main() {
 }
 
 func run() error {
+	go func() {
+		log.Println(http.ListenAndServe("localhost:6060", nil))
+	}()
 	db, dbCleanup, err := setupDatabase("file")
 	if err != nil {
 		return errors.Wrap(err, "setup db")
