@@ -1,21 +1,28 @@
 package main
 
 import (
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"log"
 	"net/http"
 	"os"
+	"text/template"
 
-	"github.com/felts94/http-example/storage"
-	"github.com/julienschmidt/httprouter"
-
-	"github.com/pkg/errors"
+	"github.com/felts94/http-example/cfg"
 )
 
-type server struct {
-	db     storage.Client
-	router *httprouter.Router
+var templates = template.Must(template.ParseFiles("tmpl/edit.html", "tmpl/view.html"))
+
+// Config holds the global state of the application
+type Config struct {
+	Port int    `json:"port"`
+	Key  []byte `json:"jwt-key"`
+}
+
+var server = Config{
+	Port: cfg.GetenvWithDefault("PORT", "8080").Int(),
+	Key:  cfg.MustGetenv("JWT_KEY_B64").Base64Decode(),
 }
 
 func main() {
@@ -27,73 +34,45 @@ func main() {
 }
 
 func run() error {
-	db, dbCleanup, err := setupDatabase("file")
+	http.HandleFunc("/status", statusHandler)
+	http.HandleFunc("/encode", encodeURL)
+	http.HandleFunc("/decode", decodeURL)
+
+	return http.ListenAndServe(fmt.Sprintf(":%d", server.Port), nil)
+}
+
+func statusHandler(w http.ResponseWriter, r *http.Request) {
+	buf, err := json.Marshal(server)
 	if err != nil {
-		return errors.Wrap(err, "setup db")
+		w.WriteHeader(http.StatusInternalServerError)
+		return
 	}
-	defer dbCleanup()
-	svr := &server{
-		db:     db,
-		router: httprouter.New(),
-	}
-
-	svr.setRoutes()
-
-	err = http.ListenAndServe(":8080", svr.router)
-
-	return err
+	w.WriteHeader(http.StatusOK)
+	w.Write(buf)
 }
 
-func setupDatabase(t string) (storage.Client, func() error, error) {
-	switch t {
-	case "newfile":
-		os.Mkdir("./storage", os.ModePerm)
-		f, err := ioutil.TempFile("./storage/", "storage*.json")
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "Creating temp file")
-		}
-		_, err = f.Write([]byte(`{"statusCheckCount": 0}`))
-		if err != nil {
-			return nil, nil, errors.Wrap(err, "Writing initial data")
-		}
-		fc := storage.FileClient{
-			File: f,
-		}
-		// pass the pointer of fileclient, that implements the storage.Client interface
-		// https://stackoverflow.com/questions/44370277/type-is-pointer-to-interface-not-interface-confusion
-		return &fc, fc.Cleanup, nil
-	case "file":
-		fname := "./storage/kv.json"
-		var f *os.File
-
-		os.Mkdir("./storage", os.ModePerm)
-		if _, err := os.Stat(fname); err != nil {
-
-			f, err = os.Create(fname)
-			if err != nil {
-				return nil, nil, errors.Wrap(err, "create "+fname)
-			}
-
-			_, err = f.Write([]byte(`{"statusCheckCount": 0}`))
-			if err != nil {
-				return nil, nil, errors.Wrap(err, "Writing initial data")
-			}
-		} else {
-			f, err = os.Open(fname)
-			if err != nil {
-				return nil, nil, errors.Wrap(err, "opening "+fname)
-			}
-		}
-
-		fc := &storage.FileClient{
-			File: f,
-		}
-		return fc, fc.Cleanup, nil
-
+func encodeURL(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		renderTemplate(w, "edit")
 	}
-	return nil, nil, errors.New("Invalid DB type")
+	b, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+	defer r.Body.Close()
+	encoded := base64.StdEncoding.EncodeToString(b)
+	w.Write([]byte(encoded))
+}
+func decodeURL(w http.ResponseWriter, r *http.Request) {
+	data := r.URL.Query().Get("data")
+	buf, _ := base64.StdEncoding.DecodeString(data)
+	w.Write(buf)
+
 }
 
-func (s *server) Logf(msg string, v ...interface{}) {
-	log.Printf(msg, v...)
+func renderTemplate(w http.ResponseWriter, tmpl string) {
+	err := templates.ExecuteTemplate(w, tmpl+".html", nil)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
 }
